@@ -24,7 +24,7 @@ sub irc {
     my $port         = $config{port}     || 6667;
     my $nickname     = $config{nickname};
     my $instance_key = $config{key}      || "$host:$port";
-    $self->{config}{interval} ||= 2;
+    $self->{config}{interval} = defined $config{interval} ? $config{interval} : 2;
     $self->{config}{interval} = 2 unless $self->{config}{interval} =~ /\A[0-9]+\z/;
 
     my %recive_commands = map {
@@ -47,11 +47,20 @@ sub irc {
         return if defined $err;
 
         # join channels
-        while (my($channel, $conf) = each %{ $config{channels} }) {
-            sleep $self->{config}{interval};
-            my $conf = $config{channels}->{$channel};
-            warn "join channel: $channel";
-            $self->join_channel( $channel, $conf->{key} );
+        my @channels = keys %{ $config{channels} };
+        if ( @channels ) {
+            my $join_on_connect; $join_on_connect = AnyEvent->timer(
+                after    => $self->{config}{interval},
+                interval => $self->{config}{interval},
+                cb       => sub {
+                    my $channel = shift @channels;
+                    warn "join channel: $channel";
+                    $self->join_channel( $channel, $config{channels}->{$channel}->{key} );
+                    if ( !@channels ) {
+                        undef $join_on_connect;
+                    }
+                }
+            );
         }
     } );
     if ( $config{on_disconnect} ) {
@@ -82,6 +91,8 @@ sub irc {
             AnySan->broadcast_message($receive);
         }
     );
+
+    $con->enable_ssl if $config{enable_ssl}; # enable ssl
 
     # connect server
     $con->connect ($host, $port, {
@@ -178,6 +189,7 @@ AnySan::Provider::IRC - AnySan provide IRC protocol
   my $irc = irc
       'chat.example.net', # irc servername *required
       port     => 6667, # default is 6667
+      enable_ssl => 0, # 1 = use ssl socket, default is no use ssl
       password => 'server_password',
       key      => 'example1', # you can write, unique key *required
       nickname => 'AnySan1',  # irc nickname *required
